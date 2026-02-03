@@ -17,10 +17,13 @@
   "description": "Backend server for InDesign to PDF conversion",
   "dependencies": {
     "adm-zip": "^0.5.16",
+    "canvas": "^3.2.1",
     "cors": "^2.8.6",
     "dotenv": "^17.2.3",
     "express": "^5.2.1",
     "multer": "^2.0.2",
+    "openai": "^6.17.0",
+    "pdf2json": "^4.0.2",
     "uuid": "^13.0.0"
   }
 }

@@ -8,9 +8,10 @@ import config from "../config/config.js";
  * Converts an InDesign file to PDF using desktop Adobe InDesign
  * @param {string} indesignFilePath - Path to the .indd or .idml file
  * @param {string} outputDir - Directory to save the PDF
+ * @param {string[]} availableFontNames - Array of font names available in Document fonts folder
  * @returns {Promise<string>} - Path to the generated PDF file
  */
-export async function convertInDesignToPDF(indesignFilePath, outputDir) {
+export async function convertInDesignToPDF(indesignFilePath, outputDir, availableFontNames = []) {
   try {
     // Verify InDesign file exists
     const fileExists = await checkFileExists(indesignFilePath);
@@ -31,7 +32,7 @@ export async function convertInDesignToPDF(indesignFilePath, outputDir) {
     await fs.mkdir(outputDir, { recursive: true });
 
     // Create and execute ExtendScript
-    await executeInDesignScript(indesignFilePath, pdfPath);
+    await executeInDesignScript(indesignFilePath, pdfPath, availableFontNames);
 
     // Verify PDF was created
     const pdfExists = await checkFileExists(pdfPath);
@@ -55,17 +56,46 @@ export async function convertInDesignToPDF(indesignFilePath, outputDir) {
  * Executes ExtendScript via desktop InDesign application
  * @param {string} indesignFilePath - Path to the InDesign file
  * @param {string} pdfOutputPath - Path where PDF should be saved
+ * @param {string[]} availableFontNames - Array of font names available in Document fonts folder
  */
-async function executeInDesignScript(indesignFilePath, pdfOutputPath) {
+async function executeInDesignScript(indesignFilePath, pdfOutputPath, availableFontNames = []) {
   // Create temporary ExtendScript file
   const scriptPath = path.join(
     os.tmpdir(),
     `indesign_export_${Date.now()}.jsx`
   );
 
+  // Convert available font names to JSON for the script
+  const availableFontsJSON = JSON.stringify(availableFontNames);
+
   // ExtendScript to open InDesign file and export to PDF
   const script = `
 #target indesign
+
+// Parse available fonts from Document fonts folder
+var availableFonts = ${availableFontsJSON};
+
+// Helper function to check if a font is similar to any available font
+function isFontAvailable(missingFontName) {
+  if (!availableFonts || availableFonts.length === 0) {
+    return false;
+  }
+
+  // Normalize the missing font name (remove spaces, hyphens, make lowercase)
+  var normalizedMissing = missingFontName.toLowerCase().replace(/[\\s-_]/g, '');
+
+  for (var i = 0; i < availableFonts.length; i++) {
+    var availableFont = availableFonts[i].toLowerCase().replace(/[\\s-_]/g, '');
+
+    // Check if the missing font name is contained in the available font
+    // e.g., "solwayextrabold" matches "Solway-ExtraBold"
+    if (normalizedMissing.indexOf(availableFont) >= 0 || availableFont.indexOf(normalizedMissing) >= 0) {
+      return true;
+    }
+  }
+
+  return false;
+}
 
 // Helper function to build error message
 function buildErrorMessage(doc) {
@@ -75,22 +105,87 @@ function buildErrorMessage(doc) {
   try {
     // Check for missing fonts
     var missingFonts = [];
+    var skippedFonts = []; // Fonts in Document fonts folder but not yet loaded by InDesign
+
     for (var i = 0; i < doc.fonts.length; i++) {
-      var font = doc.fonts[i];
-      if (font.status === FontStatus.NOT_AVAILABLE || font.status === FontStatus.UNKNOWN) {
-        missingFonts.push(font.name + " (" + font.fontFamily + " " + font.fontStyleName + ")");
+      try {
+        var font = doc.fonts[i];
+        // Try to access font properties - if they're not available, skip this font
+        if (font.status === FontStatus.NOT_AVAILABLE || font.status === FontStatus.UNKNOWN) {
+          var fontName = font.name || "Unknown";
+          var fontFamily = "";
+          var fontStyle = "";
+
+          try {
+            fontFamily = font.fontFamily || "";
+          } catch (e) {}
+
+          try {
+            fontStyle = font.fontStyleName || "";
+          } catch (e) {}
+
+          var displayName = fontName;
+          if (fontFamily || fontStyle) {
+            displayName += " (" + fontFamily + " " + fontStyle + ")";
+          }
+
+          // Check if this font is available in Document fonts folder
+          var fontBaseName = fontName.replace(/\\s*\\([^)]*\\)/g, ''); // Remove parentheses parts
+          if (isFontAvailable(fontBaseName) || isFontAvailable(fontFamily) || isFontAvailable(displayName)) {
+            // Font is in Document fonts but InDesign hasn't loaded it yet
+            skippedFonts.push(displayName);
+            $.writeln("INFO: Font '" + displayName + "' is in Document fonts folder, will proceed with conversion");
+          } else {
+            // Font is genuinely missing from Document fonts folder
+            missingFonts.push(displayName);
+          }
+        }
+      } catch (fontErr) {
+        // If we can't access this font's properties, skip it
+        // This prevents the entire export from failing due to problematic fonts
+        continue;
       }
     }
 
+    // Report skipped fonts as info
+    if (skippedFonts.length > 0) {
+      $.writeln("\\nINFO: " + skippedFonts.length + " font(s) from Document fonts folder not yet loaded by InDesign:");
+      for (var i = 0; i < skippedFonts.length; i++) {
+        $.writeln("  - " + skippedFonts[i]);
+      }
+      $.writeln("These fonts will be substituted or loaded during export.\\n");
+    }
+
+    // Only report genuinely missing fonts as errors
     if (missingFonts.length > 0) {
       hasErrors = true;
       errorMsg += "• Missing Fonts (" + missingFonts.length + "):\\n";
+      errorMsg += "  The following fonts are NOT in your Document fonts folder:\\n\\n";
+
       for (var i = 0; i < Math.min(missingFonts.length, 10); i++) {
         errorMsg += "  - " + missingFonts[i] + "\\n";
       }
+
       if (missingFonts.length > 10) {
         errorMsg += "  ... and " + (missingFonts.length - 10) + " more\\n";
       }
+
+      errorMsg += "\\n";
+      errorMsg += "Solutions:\\n";
+      errorMsg += "  1. Add the missing font files to the 'Document fonts' folder in your zip file\\n";
+      errorMsg += "  2. Replace the fonts in your InDesign document with available alternatives\\n";
+
+      if (availableFonts && availableFonts.length > 0) {
+        errorMsg += "\\n";
+        errorMsg += "Available fonts in your Document fonts folder:\\n";
+        for (var j = 0; j < Math.min(availableFonts.length, 10); j++) {
+          errorMsg += "  ✓ " + availableFonts[j] + "\\n";
+        }
+        if (availableFonts.length > 10) {
+          errorMsg += "  ... and " + (availableFonts.length - 10) + " more\\n";
+        }
+      }
+
       errorMsg += "\\n";
     }
 
@@ -142,8 +237,9 @@ function buildErrorMessage(doc) {
     }
 
   } catch (e) {
-    errorMsg += "Error checking document: " + e.message + "\\n";
-    hasErrors = true;
+    // Log the error but don't treat it as critical
+    // This allows PDF export to proceed even if we can't fully validate the document
+    $.writeln("Warning: Could not fully check document - " + e.message);
   }
 
   if (hasErrors) {
