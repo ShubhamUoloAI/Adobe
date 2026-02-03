@@ -97,6 +97,353 @@ function isFontAvailable(missingFontName) {
   return false;
 }
 
+// Helper function to run preflight on a book
+function runBookPreflight(book) {
+  try {
+    $.writeln("[Preflight Debug] Starting book preflight check...");
+    $.writeln("[Preflight Debug] Book has " + book.bookContents.length + " document(s)");
+
+    // Check if preflight is available
+    if (typeof app.preflightOptions === 'undefined') {
+      $.writeln("[Preflight Debug] Preflight not available - checking basic errors only");
+      return checkBookBasicErrors(book);
+    }
+
+    var allErrors = [];
+    var bookFile = book.fullName;
+    var bookFolder = bookFile.parent;
+
+    $.writeln("[Preflight Debug] Book location: " + bookFile.fsName);
+    $.writeln("[Preflight Debug] Book folder: " + bookFolder.fsName);
+
+    // Run preflight on each document in the book
+    for (var i = 0; i < book.bookContents.length; i++) {
+      var bookContent = book.bookContents[i];
+      var docName = bookContent.name;
+
+      $.writeln("[Preflight Debug] Checking document " + (i + 1) + "/" + book.bookContents.length + ": " + docName);
+
+      try {
+        // Try multiple locations to find the document
+        var docFile = null;
+
+        // 1. Try same directory as book
+        $.writeln("[Preflight Debug] Trying: " + bookFolder.fsName + "/" + docName);
+        docFile = File(bookFolder.fsName + "/" + docName);
+
+        // 2. If not found, search recursively
+        if (!docFile.exists) {
+          $.writeln("[Preflight Debug] Not found in book directory, searching recursively...");
+          docFile = findFileInFolder(bookFolder, docName);
+        }
+
+        // 3. If still not found, try parent directory
+        if (!docFile || !docFile.exists) {
+          $.writeln("[Preflight Debug] Trying parent directory...");
+          var parentFolder = bookFolder.parent;
+          if (parentFolder) {
+            docFile = findFileInFolder(parentFolder, docName);
+          }
+        }
+
+        if (!docFile || !docFile.exists) {
+          throw new Error("Document file not found: " + docName);
+        }
+
+        $.writeln("[Preflight Debug] Opening: " + docFile.fsName);
+        var doc = app.open(docFile, false);
+
+        // Check basic errors (fonts/links)
+        var basicErrors = buildErrorMessage(doc);
+
+        // Close the document
+        doc.close(SaveOptions.NO);
+
+        if (basicErrors) {
+          $.writeln("[Preflight Debug] Document '" + docName + "' has errors");
+          allErrors.push("Document: " + docName + "\\n" + basicErrors);
+        } else {
+          $.writeln("[Preflight Debug] Document '" + docName + "' passed checks");
+        }
+
+      } catch (e) {
+        $.writeln("[Preflight Debug] Error checking document '" + docName + "': " + e.message);
+        allErrors.push("Document: " + docName + "\\nError: " + e.message);
+      }
+    }
+
+    // If any document had errors, return combined message
+    if (allErrors.length > 0) {
+      var message = "Found issues in " + allErrors.length + " document(s) in the book:\\n\\n";
+      for (var i = 0; i < allErrors.length; i++) {
+        message += allErrors[i] + "\\n\\n";
+      }
+      return message;
+    }
+
+    $.writeln("[Preflight Debug] Book check completed successfully with no errors");
+    return null;
+
+  } catch (e) {
+    $.writeln("[Preflight Debug] EXCEPTION in book preflight: " + e.message);
+    return "Book check failed: " + e.message;
+  }
+}
+
+// Helper function to find a file in a folder recursively
+function findFileInFolder(folder, fileName) {
+  try {
+    var files = folder.getFiles();
+    for (var i = 0; i < files.length; i++) {
+      if (files[i] instanceof Folder) {
+        var found = findFileInFolder(files[i], fileName);
+        if (found) return found;
+      } else if (files[i].name === fileName) {
+        return files[i];
+      }
+    }
+  } catch (e) {
+    $.writeln("[Preflight Debug] Error searching folder: " + e.message);
+  }
+  return null;
+}
+
+// Helper function to check basic errors in book (if preflight not available)
+function checkBookBasicErrors(book) {
+  $.writeln("[Preflight Debug] Checking basic errors in book documents...");
+  var allErrors = [];
+  var bookFile = book.fullName;
+  var bookFolder = bookFile.parent;
+
+  $.writeln("[Preflight Debug] Book location: " + bookFile.fsName);
+
+  for (var i = 0; i < book.bookContents.length; i++) {
+    var bookContent = book.bookContents[i];
+    var docName = bookContent.name;
+
+    try {
+      // Try multiple locations to find the document
+      var docFile = File(bookFolder.fsName + "/" + docName);
+
+      if (!docFile.exists) {
+        docFile = findFileInFolder(bookFolder, docName);
+      }
+
+      if (!docFile || !docFile.exists) {
+        var parentFolder = bookFolder.parent;
+        if (parentFolder) {
+          docFile = findFileInFolder(parentFolder, docName);
+        }
+      }
+
+      if (!docFile || !docFile.exists) {
+        allErrors.push("Document: " + docName + "\\nError: File not found");
+        continue;
+      }
+
+      var doc = app.open(docFile, false);
+      var basicErrors = buildErrorMessage(doc);
+      doc.close(SaveOptions.NO);
+
+      if (basicErrors) {
+        allErrors.push("Document: " + docName + "\\n" + basicErrors);
+      }
+    } catch (e) {
+      allErrors.push("Document: " + docName + "\\nError: " + e.message);
+    }
+  }
+
+  if (allErrors.length > 0) {
+    var message = "Found issues in " + allErrors.length + " document(s):\\n\\n";
+    for (var i = 0; i < allErrors.length; i++) {
+      message += allErrors[i] + "\\n\\n";
+    }
+    return message;
+  }
+
+  return null;
+}
+
+// Helper function to run preflight and check for errors
+function runPreflight(doc) {
+  try {
+    $.writeln("[Preflight Debug] Starting preflight check...");
+
+    // Check if preflight is available
+    if (typeof app.preflightOptions === 'undefined') {
+      $.writeln("[Preflight Debug] ERROR: app.preflightOptions is undefined");
+      return "Preflight is not available in this version of InDesign";
+    }
+
+    $.writeln("[Preflight Debug] Preflight options available");
+    $.writeln("[Preflight Debug] Current preflightOff: " + app.preflightOptions.preflightOff);
+
+    // Enable preflight if not already enabled
+    app.preflightOptions.preflightOff = false;
+    $.writeln("[Preflight Debug] Set preflightOff to false");
+
+    // Try to get the preflight process
+    var preflightProcess = null;
+    try {
+      preflightProcess = doc.preflightProcess;
+    } catch (e) {
+      $.writeln("[Preflight Debug] preflightProcess not available: " + e.message);
+    }
+
+    if (!preflightProcess) {
+      $.writeln("[Preflight Debug] preflightProcess not available - using basic error checks only");
+      // Fall back to basic error checking
+      return buildErrorMessage(doc);
+    }
+
+    $.writeln("[Preflight Debug] Preflight process obtained");
+
+    // Check current profile
+    var currentProfile = null;
+    try {
+      currentProfile = preflightProcess.preflightProfile;
+      if (currentProfile) {
+        $.writeln("[Preflight Debug] Current profile: " + currentProfile.name);
+        $.writeln("[Preflight Debug] Profile valid: " + currentProfile.isValid);
+      } else {
+        $.writeln("[Preflight Debug] No current profile set");
+      }
+    } catch (e) {
+      $.writeln("[Preflight Debug] Error checking current profile: " + e.message);
+    }
+
+    // If there's no valid profile, try to use the "[Basic]" profile
+    if (!currentProfile || !currentProfile.isValid) {
+      $.writeln("[Preflight Debug] Attempting to set Basic profile...");
+      try {
+        var profiles = app.preflightProfiles;
+        $.writeln("[Preflight Debug] Available profiles count: " + profiles.length);
+
+        for (var i = 0; i < profiles.length; i++) {
+          $.writeln("[Preflight Debug] Profile " + i + ": " + profiles[i].name);
+          if (profiles[i].name === "[Basic]" || profiles[i].name === "Basic" || profiles[i].name.indexOf("Basic") >= 0) {
+            preflightProcess.preflightProfile = profiles[i];
+            $.writeln("[Preflight Debug] Set profile to: " + profiles[i].name);
+            break;
+          }
+        }
+      } catch (e) {
+        $.writeln("[Preflight Debug] Error setting preflight profile: " + e.message);
+      }
+    }
+
+    // Wait for preflight to process the document
+    $.writeln("[Preflight Debug] Waiting for preflight to process (2 seconds)...");
+    $.sleep(2000);
+
+    // Wait for preflight process to complete
+    $.writeln("[Preflight Debug] Calling waitForProcess...");
+    try {
+      preflightProcess.waitForProcess(30); // Wait up to 30 seconds
+      $.writeln("[Preflight Debug] waitForProcess completed");
+    } catch (e) {
+      $.writeln("[Preflight Debug] waitForProcess error: " + e.message);
+    }
+
+    // Check for errors
+    $.writeln("[Preflight Debug] Getting aggregatedResults...");
+    var results = null;
+    try {
+      results = preflightProcess.aggregatedResults;
+      $.writeln("[Preflight Debug] Results count: " + results.length);
+    } catch (e) {
+      $.writeln("[Preflight Debug] Error getting results: " + e.message);
+      return "Could not retrieve preflight results: " + e.message;
+    }
+
+    var errorCount = 0;
+    var warningCount = 0;
+    var infoCount = 0;
+    var errorMessages = [];
+
+    // Count results by severity
+    $.writeln("[Preflight Debug] Processing " + results.length + " results...");
+    for (var i = 0; i < results.length; i++) {
+      var result = results[i];
+      var severity = "UNKNOWN";
+
+      try {
+        $.writeln("[Preflight Debug] Result " + i + " severity value: " + result.severity);
+
+        if (result.severity === PreflightSeverity.PREFLIGHT_SEVERITY_ERROR) {
+          severity = "ERROR";
+          errorCount++;
+        } else if (result.severity === PreflightSeverity.PREFLIGHT_SEVERITY_WARNING) {
+          severity = "WARNING";
+          warningCount++;
+        } else if (result.severity === PreflightSeverity.PREFLIGHT_SEVERITY_INFO) {
+          severity = "INFO";
+          infoCount++;
+        }
+
+        $.writeln("[Preflight Debug] Result " + i + " severity: " + severity);
+      } catch (e) {
+        $.writeln("[Preflight Debug] Error checking severity: " + e.message);
+        severity = "UNKNOWN";
+      }
+
+      // Only include errors and warnings in the message
+      if (severity === "ERROR" || severity === "WARNING") {
+        var ruleName = "Unknown Rule";
+        var description = "No description available";
+
+        try {
+          ruleName = result.rule.name || "Unknown Rule";
+          $.writeln("[Preflight Debug] Rule name: " + ruleName);
+        } catch (e) {
+          $.writeln("[Preflight Debug] Error getting rule name: " + e.message);
+        }
+
+        try {
+          description = result.rule.description || "No description available";
+          $.writeln("[Preflight Debug] Description: " + description);
+        } catch (e) {
+          $.writeln("[Preflight Debug] Error getting description: " + e.message);
+        }
+
+        errorMessages.push(severity + ": " + ruleName + " - " + description);
+      }
+    }
+
+    $.writeln("[Preflight Debug] Final counts - Errors: " + errorCount + ", Warnings: " + warningCount + ", Info: " + infoCount);
+
+    // If there are errors, format and return them
+    if (errorCount > 0 || warningCount > 0) {
+      var message = "Preflight found issues in the document:\\n\\n";
+      message += "• Errors: " + errorCount + "\\n";
+      message += "• Warnings: " + warningCount + "\\n";
+      message += "• Info: " + infoCount + "\\n\\n";
+
+      if (errorMessages.length > 0) {
+        message += "Details:\\n";
+        for (var i = 0; i < Math.min(errorMessages.length, 10); i++) {
+          message += "  " + (i + 1) + ". " + errorMessages[i] + "\\n";
+        }
+        if (errorMessages.length > 10) {
+          message += "  ... and " + (errorMessages.length - 10) + " more\\n";
+        }
+      }
+
+      return message;
+    }
+
+    // No errors found
+    $.writeln("[Preflight Debug] Preflight completed successfully with no errors");
+    return null;
+
+  } catch (e) {
+    $.writeln("[Preflight Debug] EXCEPTION: " + e.message);
+    $.writeln("[Preflight Debug] Stack: " + e.line);
+    // Return the error instead of ignoring it
+    return "Preflight check failed: " + e.message;
+  }
+}
+
 // Helper function to build error message
 function buildErrorMessage(doc) {
   var errorMsg = "Document has critical errors that prevent PDF export:\\n\\n";
@@ -253,32 +600,62 @@ function buildErrorMessage(doc) {
 try {
   $.writeln("Starting InDesign conversion script...");
 
-  // Suppress all dialogs and user interaction
-  app.scriptPreferences.userInteractionLevel = UserInteractionLevels.NEVER_INTERACT;
+  // Don't set userInteractionLevel - let InDesign use default behavior
+  // Setting it to NEVER_INTERACT causes "script error" on documents with warnings
+  $.writeln("Skipping userInteractionLevel setting to avoid script errors");
 
-  $.writeln("Opening InDesign document...");
+  $.writeln("Opening InDesign file...");
 
-  // Open the InDesign document
+  // Open the InDesign file (document or book)
   var sourceFile = File("${indesignFilePath.replace(/\\/g, "/")}");
   if (!sourceFile.exists) {
     throw new Error("Source file not found");
   }
 
-  var doc;
+  // Detect file type
+  var fileName = sourceFile.name.toLowerCase();
+  var isBook = fileName.indexOf('.indb') >= 0;
+  var doc = null;
+  var book = null;
+
   try {
-    doc = app.open(sourceFile, false);
+    if (isBook) {
+      $.writeln("Opening InDesign Book file...");
+      book = app.open(sourceFile, false);
+      $.writeln("Book opened successfully. Documents: " + book.bookContents.length);
+    } else {
+      $.writeln("Opening InDesign Document file...");
+      doc = app.open(sourceFile, false);
+      $.writeln("Document opened successfully. Pages: " + doc.pages.length);
+    }
   } catch (openErr) {
-    throw new Error("Failed to open document. The file may be corrupt or created in a newer version of InDesign.");
+    throw new Error("Failed to open file. It may be corrupt or created in a newer version of InDesign.");
   }
 
-  $.writeln("Document opened successfully. Pages: " + doc.pages.length);
+  // For regular documents: check for basic errors (fonts/links)
+  // For books: skip basic checks, we'll run full preflight on all documents
+  if (!isBook) {
+    var errorMessage = buildErrorMessage(doc);
+    if (errorMessage) {
+      doc.close(SaveOptions.NO);
+      app.quit();
+      throw new Error(errorMessage);
+    }
+    $.writeln("✓ Basic error checks passed (fonts/links)");
+    $.writeln("Skipping preflight for regular documents - only running on books");
+  } else {
+    // Run preflight ONLY on books
+    $.writeln("Running preflight check on book...");
+    var preflightErrors = runBookPreflight(book);
 
-  // Check for errors
-  var errorMessage = buildErrorMessage(doc);
-  if (errorMessage) {
-    doc.close(SaveOptions.NO);
-    app.quit();
-    throw new Error(errorMessage);
+    if (preflightErrors) {
+      $.writeln("\\n❌ PREFLIGHT FAILED:");
+      $.writeln(preflightErrors);
+      book.close(SaveOptions.NO);
+      app.quit();
+      throw new Error("Preflight Failed:\\n\\n" + preflightErrors);
+    }
+    $.writeln("✓ Preflight passed");
   }
 
   // Export to PDF
@@ -288,7 +665,14 @@ try {
 
   try {
     app.pdfExportPreferences.pageRange = PageRange.ALL_PAGES;
-    doc.exportFile(ExportFormat.PDF_TYPE, pdfFile, false);
+
+    if (isBook) {
+      $.writeln("Exporting book to PDF...");
+      book.exportFile(ExportFormat.PDF_TYPE, pdfFile, false);
+    } else {
+      $.writeln("Exporting document to PDF...");
+      doc.exportFile(ExportFormat.PDF_TYPE, pdfFile, false);
+    }
 
     if (!pdfFile.exists) {
       throw new Error("PDF file was not created");
@@ -299,8 +683,12 @@ try {
     throw new Error("PDF export failed: " + exportErr.message);
   }
 
-  // Close the document
-  doc.close(SaveOptions.NO);
+  // Close the file
+  if (isBook) {
+    book.close(SaveOptions.NO);
+  } else {
+    doc.close(SaveOptions.NO);
+  }
   app.quit();
 
   "SUCCESS";
@@ -308,9 +696,16 @@ try {
 } catch (err) {
   $.writeln("ERROR: " + err.message);
 
-  if (typeof doc !== 'undefined') {
+  // Close document or book if open
+  if (typeof doc !== 'undefined' && doc !== null) {
     try {
       doc.close(SaveOptions.NO);
+    } catch (e) {}
+  }
+
+  if (typeof book !== 'undefined' && book !== null) {
+    try {
+      book.close(SaveOptions.NO);
     } catch (e) {}
   }
 
@@ -426,7 +821,19 @@ end tell`;
     childProcess.stdout.on("data", (data) => {
       const output = data.toString();
       stdout += output;
-      console.log("[InDesign stdout]:", output.trim());
+
+      // Highlight preflight debug messages with colors
+      if (output.includes("[Preflight Debug]")) {
+        console.log("\x1b[36m%s\x1b[0m", "[🔍 PREFLIGHT] " + output.trim());
+      } else if (output.includes("Running preflight check")) {
+        console.log("\x1b[33m%s\x1b[0m", "[InDesign] 🔍 STARTING PREFLIGHT CHECK");
+      } else if (output.includes("Preflight passed")) {
+        console.log("\x1b[32m%s\x1b[0m", "[InDesign] ✅ PREFLIGHT PASSED");
+      } else if (output.includes("PREFLIGHT FAILED")) {
+        console.log("\x1b[31m%s\x1b[0m", "[InDesign] ❌ PREFLIGHT FAILED");
+      } else {
+        console.log("[InDesign stdout]:", output.trim());
+      }
     });
 
     childProcess.stderr.on("data", (data) => {

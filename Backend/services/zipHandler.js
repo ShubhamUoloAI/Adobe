@@ -18,11 +18,11 @@ export async function extractZipAndFindInDesignFile(zipPath, extractPath) {
     const zip = new AdmZip(zipPath);
     zip.extractAllTo(extractPath, true);
 
-    // Find InDesign file (.indd or .idml)
+    // Find InDesign file (.indd, .idml, or .indb book)
     const indesignFile = await findInDesignFile(extractPath);
 
     if (!indesignFile) {
-      throw new Error('No InDesign file (.indd or .idml) found in the zip');
+      throw new Error('No InDesign file (.indd, .idml, or .indb) found in the zip');
     }
 
     // Ensure Document fonts folder is accessible to InDesign
@@ -44,12 +44,14 @@ export async function extractZipAndFindInDesignFile(zipPath, extractPath) {
 
 /**
  * Recursively searches for InDesign files in a directory
+ * Prioritizes .indb (book) files over .indd (document) files
  * @param {string} dirPath - Directory to search
  * @returns {Promise<string|null>} - Path to the InDesign file or null
  */
 async function findInDesignFile(dirPath) {
   try {
     const entries = await fs.readdir(dirPath, { withFileTypes: true });
+    let documentFile = null; // Fallback to document if no book found
 
     for (const entry of entries) {
       const fullPath = path.join(dirPath, entry.name);
@@ -65,13 +67,27 @@ async function findInDesignFile(dirPath) {
         if (found) return found;
       } else if (entry.isFile()) {
         const ext = path.extname(entry.name).toLowerCase();
-        if (ext === '.indd' || ext === '.idml') {
+
+        // Prioritize book files (.indb) - return immediately if found
+        if (ext === '.indb') {
+          console.log(`✓ Found InDesign Book file: ${entry.name}`);
           return fullPath;
+        }
+
+        // Store document file as fallback
+        if (ext === '.indd' || ext === '.idml') {
+          if (!documentFile) {
+            documentFile = fullPath;
+          }
         }
       }
     }
 
-    return null;
+    // Return document file if no book was found
+    if (documentFile) {
+      console.log(`✓ Found InDesign Document file: ${path.basename(documentFile)}`);
+    }
+    return documentFile;
   } catch (error) {
     throw new Error(`Error searching for InDesign file: ${error.message}`);
   }
