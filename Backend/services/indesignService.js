@@ -15,7 +15,9 @@ export async function convertInDesignToPDF(indesignFilePath, outputDir) {
     // Verify InDesign file exists
     const fileExists = await checkFileExists(indesignFilePath);
     if (!fileExists) {
-      throw new Error(`InDesign file not found: ${indesignFilePath}`);
+      const error = new Error(`InDesign file not found: ${indesignFilePath}`);
+      error.code = "FILE_NOT_FOUND";
+      throw error;
     }
 
     // Generate output PDF path
@@ -34,12 +36,18 @@ export async function convertInDesignToPDF(indesignFilePath, outputDir) {
     // Verify PDF was created
     const pdfExists = await checkFileExists(pdfPath);
     if (!pdfExists) {
-      throw new Error("PDF was not generated successfully");
+      const error = new Error("PDF was not generated successfully");
+      error.code = "PDF_NOT_GENERATED";
+      throw error;
     }
 
     return pdfPath;
   } catch (error) {
-    throw new Error(`Failed to convert InDesign to PDF: ${error.message}`);
+    // Just mark it as InDesign error and pass through
+    if (!error.code) {
+      error.code = "INDESIGN_ERROR";
+    }
+    throw error;
   }
 }
 
@@ -59,6 +67,93 @@ async function executeInDesignScript(indesignFilePath, pdfOutputPath) {
   const script = `
 #target indesign
 
+// Helper function to build error message
+function buildErrorMessage(doc) {
+  var errorMsg = "Document has critical errors that prevent PDF export:\\n\\n";
+  var hasErrors = false;
+
+  try {
+    // Check for missing fonts
+    var missingFonts = [];
+    for (var i = 0; i < doc.fonts.length; i++) {
+      var font = doc.fonts[i];
+      if (font.status === FontStatus.NOT_AVAILABLE || font.status === FontStatus.UNKNOWN) {
+        missingFonts.push(font.name + " (" + font.fontFamily + " " + font.fontStyleName + ")");
+      }
+    }
+
+    if (missingFonts.length > 0) {
+      hasErrors = true;
+      errorMsg += "• Missing Fonts (" + missingFonts.length + "):\\n";
+      for (var i = 0; i < Math.min(missingFonts.length, 10); i++) {
+        errorMsg += "  - " + missingFonts[i] + "\\n";
+      }
+      if (missingFonts.length > 10) {
+        errorMsg += "  ... and " + (missingFonts.length - 10) + " more\\n";
+      }
+      errorMsg += "\\n";
+    }
+
+    // Check for missing links
+    var missingLinks = [];
+    var corruptLinks = [];
+    var links = doc.links;
+
+    for (var i = 0; i < links.length; i++) {
+      var link = links[i];
+      if (link.status === LinkStatus.LINK_MISSING) {
+        missingLinks.push(link.name);
+      } else if (link.status === LinkStatus.NORMAL || link.status === LinkStatus.LINK_EMBEDDED) {
+        try {
+          if (link.status !== LinkStatus.LINK_EMBEDDED) {
+            var linkFile = File(link.filePath);
+            if (!linkFile.exists) {
+              corruptLinks.push(link.name);
+            }
+          }
+        } catch (e) {
+          corruptLinks.push(link.name);
+        }
+      }
+    }
+
+    if (missingLinks.length > 0) {
+      hasErrors = true;
+      errorMsg += "• Missing Images/Links (" + missingLinks.length + "):\\n";
+      for (var i = 0; i < Math.min(missingLinks.length, 10); i++) {
+        errorMsg += "  - " + missingLinks[i] + "\\n";
+      }
+      if (missingLinks.length > 10) {
+        errorMsg += "  ... and " + (missingLinks.length - 10) + " more\\n";
+      }
+      errorMsg += "\\n";
+    }
+
+    if (corruptLinks.length > 0) {
+      hasErrors = true;
+      errorMsg += "• Corrupt/Inaccessible Images (" + corruptLinks.length + "):\\n";
+      for (var i = 0; i < Math.min(corruptLinks.length, 10); i++) {
+        errorMsg += "  - " + corruptLinks[i] + "\\n";
+      }
+      if (corruptLinks.length > 10) {
+        errorMsg += "  ... and " + (corruptLinks.length - 10) + " more\\n";
+      }
+      errorMsg += "\\n";
+    }
+
+  } catch (e) {
+    errorMsg += "Error checking document: " + e.message + "\\n";
+    hasErrors = true;
+  }
+
+  if (hasErrors) {
+    errorMsg += "\\nPlease fix these issues in InDesign before converting to PDF.";
+    return errorMsg;
+  }
+
+  return null;
+}
+
 try {
   $.writeln("Starting InDesign conversion script...");
 
@@ -70,64 +165,63 @@ try {
   // Open the InDesign document
   var sourceFile = File("${indesignFilePath.replace(/\\/g, "/")}");
   if (!sourceFile.exists) {
-    throw new Error("Source file not found: " + sourceFile.fsName);
+    throw new Error("Source file not found");
   }
 
-  var doc = app.open(sourceFile, false); // false = don't show dialogs
+  var doc;
+  try {
+    doc = app.open(sourceFile, false);
+  } catch (openErr) {
+    throw new Error("Failed to open document. The file may be corrupt or created in a newer version of InDesign.");
+  }
 
   $.writeln("Document opened successfully. Pages: " + doc.pages.length);
 
-  // Check for missing fonts (don't fail, just warn)
-  if (doc.fonts.length > 0) {
-    $.writeln("Document has " + doc.fonts.length + " fonts");
+  // Check for errors
+  var errorMessage = buildErrorMessage(doc);
+  if (errorMessage) {
+    doc.close(SaveOptions.NO);
+    app.quit();
+    throw new Error(errorMessage);
   }
 
   // Export to PDF
   var pdfFile = File("${pdfOutputPath.replace(/\\/g, "/")}");
 
-  $.writeln("Configuring PDF export preferences...");
-
-  // Set PDF export preset (using default High Quality Print preset)
-  app.pdfExportPreferences.pageRange = PageRange.ALL_PAGES;
-
   $.writeln("Starting PDF export...");
 
-  // Export the document
-  doc.exportFile(ExportFormat.PDF_TYPE, pdfFile, false);
+  try {
+    app.pdfExportPreferences.pageRange = PageRange.ALL_PAGES;
+    doc.exportFile(ExportFormat.PDF_TYPE, pdfFile, false);
 
-  $.writeln("PDF export completed successfully");
+    if (!pdfFile.exists) {
+      throw new Error("PDF file was not created");
+    }
 
-  // Close the document without saving
+    $.writeln("PDF export completed successfully");
+  } catch (exportErr) {
+    throw new Error("PDF export failed: " + exportErr.message);
+  }
+
+  // Close the document
   doc.close(SaveOptions.NO);
-
-  $.writeln("Document closed. Conversion complete.");
-
-  // Quit InDesign to ensure process terminates
   app.quit();
 
-  // Return success message
   "SUCCESS";
 
 } catch (err) {
-  $.writeln("ERROR occurred: " + err.message);
+  $.writeln("ERROR: " + err.message);
 
-  // Close document if it's open
   if (typeof doc !== 'undefined') {
     try {
-      $.writeln("Attempting to close document...");
       doc.close(SaveOptions.NO);
-    } catch (e) {
-      $.writeln("Could not close document: " + e.message);
-    }
+    } catch (e) {}
   }
 
-  // Try to quit InDesign
   try {
     app.quit();
   } catch (e) {}
 
-  // Write error to stderr
-  $.writeln("ERROR: " + err.message);
   throw err;
 }
 `;
@@ -142,7 +236,7 @@ try {
     // Clean up temporary script file
     await fs.unlink(scriptPath).catch(() => {});
   } catch (error) {
-    // Clean up temporary script file on error
+    // Clean up temporary script file
     await fs.unlink(scriptPath).catch(() => {});
     throw error;
   }
@@ -274,18 +368,46 @@ end tell`;
         .join("\n")
         .trim();
 
-      if (code !== 0 || filteredStderr.includes("ERROR:")) {
+      if (code !== 0 || filteredStderr.includes("ERROR:") || stdout.includes("ERROR:")) {
         console.log("[InDesign] Conversion FAILED");
-        reject(
-          new Error(
-            `InDesign script execution failed: ${
-              filteredStderr || stdout || `Exit code ${code}`
-            }`
-          )
-        );
+
+        // Extract error message from stderr/stdout
+        let errorMessage = "";
+
+        // Look for ERROR: in combined output
+        const combinedOutput = filteredStderr + "\n" + stdout;
+        const errorMatch = combinedOutput.match(/ERROR:\s*(.+)/s);
+
+        if (errorMatch) {
+          // Extract everything after "ERROR:"
+          errorMessage = errorMatch[1].replace(/\\n/g, '\n').trim();
+        } else {
+          // No "ERROR:" prefix found, use the full stderr/stdout
+          errorMessage = (filteredStderr || stdout || `Process exited with code ${code}`)
+            .replace(/\\n/g, '\n')
+            .trim();
+        }
+
+        // Clean up AppleScript/InDesign error prefixes and suffixes (works for all errors)
+        errorMessage = errorMessage
+          // Remove temp file path and line numbers (e.g., "/var/folders/.../script.scpt:165:205:")
+          .replace(/^.*\.scpt:\d+:\d+:\s*/gm, '')
+          // Remove "execution error: Adobe InDesign XXXX got an error:"
+          .replace(/execution error:\s*Adobe InDesign \d+\s+got an error:\s*/gi, '')
+          // Remove "Uncaught JavaScript exception:"
+          .replace(/Uncaught JavaScript exception:\s*/gi, '')
+          // Remove error codes at the end like "(54)" or "(-1234)"
+          .replace(/\s*\([-0-9]+\)\s*$/gm, '')
+          // Clean up extra whitespace and newlines
+          .replace(/\n{3,}/g, '\n\n')
+          .trim();
+
+        const error = new Error(errorMessage);
+        error.code = "INDESIGN_CONVERSION_FAILED";
+        reject(error);
       } else {
         console.log("[InDesign] Conversion SUCCESS");
-        resolve(stdout);
+        resolve();
       }
     });
   });

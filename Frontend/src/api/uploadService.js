@@ -4,6 +4,28 @@ import axios from 'axios';
 const API_URL = import.meta.env.VITE_API_URL || '';
 
 /**
+ * Cleans up AppleScript/InDesign error prefixes from error messages
+ * @param {string} message - The error message to clean
+ * @returns {string} - The cleaned error message
+ */
+function cleanErrorMessage(message) {
+  if (!message) return message;
+
+  return message
+    // Remove temp file path and line numbers (e.g., "/var/folders/.../script.scpt:165:205:")
+    .replace(/^.*\.scpt:\d+:\d+:\s*/gm, '')
+    // Remove "execution error: Adobe InDesign XXXX got an error:"
+    .replace(/execution error:\s*Adobe InDesign \d+\s+got an error:\s*/gi, '')
+    // Remove "Uncaught JavaScript exception:"
+    .replace(/Uncaught JavaScript exception:\s*/gi, '')
+    // Remove error codes at the end like "(54)" or "(-1234)"
+    .replace(/\s*\([-0-9]+\)\s*$/gm, '')
+    // Clean up extra whitespace and newlines
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+}
+
+/**
  * Uploads a zip file and downloads the generated PDF
  * @param {File} file - The zip file to upload
  * @param {Function} onUploadProgress - Progress callback
@@ -41,9 +63,11 @@ export async function uploadAndConvertToPDF(file, onUploadProgress) {
         // Parse blob error message
         const text = await error.response.data.text();
         const errorData = JSON.parse(text);
-        throw new Error(errorData.error || 'Server error');
+        const errorMessage = errorData.message || errorData.error || 'Server error';
+        throw new Error(cleanErrorMessage(errorMessage));
       } else {
-        throw new Error(error.response.data.error || 'Server error');
+        const errorMessage = error.response.data.message || error.response.data.error || 'Server error';
+        throw new Error(cleanErrorMessage(errorMessage));
       }
     } else if (error.request) {
       // Request made but no response

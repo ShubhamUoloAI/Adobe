@@ -67,7 +67,7 @@ router.post('/upload', upload.single('file'), async (req, res) => {
     const { indesignFile } = await extractZipAndFindInDesignFile(uploadedFilePath, extractPath);
     console.log(`InDesign file found: ${indesignFile}`);
 
-    // Convert to PDF using InDesign Server
+    // Convert to PDF using InDesign
     console.log('Converting to PDF...');
     pdfPath = await convertInDesignToPDF(indesignFile, extractPath);
     console.log(`PDF generated: ${pdfPath}`);
@@ -89,21 +89,38 @@ router.post('/upload', upload.single('file'), async (req, res) => {
     // Clean up files on error
     await cleanupFiles([uploadedFilePath, extractPath, pdfPath]);
 
-    // Send appropriate error response
-    if (error.message.includes('No InDesign file')) {
-      return res.status(400).json({ error: error.message });
-    }
-
-    if (error.message.includes('Cannot connect to InDesign Server')) {
-      return res.status(503).json({
-        error: 'InDesign Server is not available',
-        details: error.message
+    // Handle InDesign conversion errors
+    if (error.code === 'INDESIGN_CONVERSION_FAILED') {
+      return res.status(422).json({
+        error: 'InDesign Conversion Failed',
+        message: error.message,
+        code: error.code
       });
     }
 
+    // Handle file not found errors
+    if (error.code === 'FILE_NOT_FOUND' || error.message.includes('No InDesign file')) {
+      return res.status(400).json({
+        error: 'File Not Found',
+        message: error.message,
+        code: error.code
+      });
+    }
+
+    // Handle timeout errors
+    if (error.message.includes('timed out')) {
+      return res.status(504).json({
+        error: 'Conversion Timeout',
+        message: error.message,
+        code: error.code
+      });
+    }
+
+    // Generic error
     res.status(500).json({
       error: 'Failed to process file',
-      details: error.message
+      message: error.message,
+      code: error.code || 'UNKNOWN_ERROR'
     });
   }
 });
