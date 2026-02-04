@@ -6,15 +6,73 @@ import { extractZipAndFindInDesignFile, isValidZipFile } from '../services/zipHa
 import { convertInDesignToPDF } from '../services/indesignService.js';
 import { fileURLToPath } from 'url';
 import { dirname } from 'path';
+import { execSync } from 'child_process';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
-// Configuration
-const SOURCE_FOLDER = '/Users/shubham/Downloads/UoloZip';
-const OUTPUT_FOLDER = '/Users/shubham/Downloads/UoloPdf';
-const REPORT_FOLDER = '/Users/shubham/Downloads/UoloReport';
-const TEMP_EXTRACT_PATH = path.join(__dirname, '..', 'temp', 'batch_extract');
+/**
+ * Show folder selection dialog (macOS)
+ * @param {string} promptMessage - Message to display in dialog
+ * @returns {Promise<string>} Selected folder path
+ */
+async function selectFolder(promptMessage) {
+  try {
+    const appleScript = `
+      tell application "System Events"
+        activate
+        set folderPath to choose folder with prompt "${promptMessage}"
+        return POSIX path of folderPath
+      end tell
+    `;
+
+    const result = execSync(`osascript -e '${appleScript}'`, { encoding: 'utf8' });
+    return result.trim();
+  } catch (error) {
+    throw new Error(`Folder selection cancelled or failed: ${error.message}`);
+  }
+}
+
+/**
+ * Get folder configuration from user
+ * @returns {Promise<Object>} Configuration object with folder paths
+ */
+async function getFolderConfiguration() {
+  console.log('\n📁 Folder Configuration');
+  console.log('='.repeat(60));
+  console.log('Please select the required folders...\n');
+
+  // Select source folder
+  console.log('1️⃣  Select SOURCE folder (containing .zip files)');
+  const SOURCE_FOLDER = await selectFolder('Select SOURCE folder with InDesign ZIP files');
+  console.log(`   ✓ Source: ${SOURCE_FOLDER}\n`);
+
+  // Select output folder
+  console.log('2️⃣  Select OUTPUT folder (for generated PDFs)');
+  const OUTPUT_FOLDER = await selectFolder('Select OUTPUT folder for PDFs');
+  console.log(`   ✓ Output: ${OUTPUT_FOLDER}\n`);
+
+  // Select report folder
+  console.log('3️⃣  Select REPORT folder (for error logs)');
+  const REPORT_FOLDER = await selectFolder('Select REPORT folder for error logs');
+  console.log(`   ✓ Report: ${REPORT_FOLDER}\n`);
+
+  // Create config file in source folder
+  const configPath = path.join(SOURCE_FOLDER, 'batch-config.json');
+  const config = {
+    SOURCE_FOLDER,
+    OUTPUT_FOLDER,
+    REPORT_FOLDER,
+    TEMP_EXTRACT_PATH: path.join(__dirname, '..', 'temp', 'batch_extract'),
+    createdAt: new Date().toISOString()
+  };
+
+  await fs.writeFile(configPath, JSON.stringify(config, null, 2));
+  console.log(`💾 Configuration saved to: ${configPath}`);
+  console.log('='.repeat(60));
+
+  return config;
+}
 
 /**
  * Main batch conversion function
@@ -23,8 +81,17 @@ async function batchConvert() {
   console.log('='.repeat(60));
   console.log('InDesign Batch PDF Converter');
   console.log('='.repeat(60));
+
+  // Get folder configuration from user
+  const config = await getFolderConfiguration();
+  const { SOURCE_FOLDER, OUTPUT_FOLDER, REPORT_FOLDER, TEMP_EXTRACT_PATH } = config;
+
+  console.log('\n' + '='.repeat(60));
+  console.log('Starting Batch Conversion');
+  console.log('='.repeat(60));
   console.log(`Source: ${SOURCE_FOLDER}`);
   console.log(`Output: ${OUTPUT_FOLDER}`);
+  console.log(`Report: ${REPORT_FOLDER}`);
   console.log('='.repeat(60));
 
   const errors = [];
@@ -38,7 +105,7 @@ async function batchConvert() {
 
     // Get all zip files from source folder
     const files = await fs.readdir(SOURCE_FOLDER);
-    const zipFiles = files.filter(file => file.toLowerCase().endsWith('.zip'));
+    const zipFiles = files.filter(file => file.toLowerCase().endsWith('.zip') && file !== '__MACOSX');
 
     console.log(`\nFound ${zipFiles.length} zip file(s) to process\n`);
 
@@ -126,7 +193,7 @@ async function batchConvert() {
 
     // Generate error log if there were errors
     if (errors.length > 0) {
-      await generateErrorLog(errors);
+      await generateErrorLog(errors, REPORT_FOLDER);
     } else {
       console.log('\n🎉 All files converted successfully!');
     }
@@ -141,8 +208,9 @@ async function batchConvert() {
 /**
  * Generate Excel error log
  * @param {Array} errors - Array of error objects with filename and error message
+ * @param {string} REPORT_FOLDER - Path to report folder
  */
-async function generateErrorLog(errors) {
+async function generateErrorLog(errors, REPORT_FOLDER) {
   console.log('\n📝 Generating error log...');
 
   try {
