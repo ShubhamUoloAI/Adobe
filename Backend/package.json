@@ -9,7 +9,8 @@
     "test": "echo \"Error: no test specified\" && exit 1",
     "test:indesign": "node test-indesign.js",
     "health": "node health-check.js",
-    "find:indesign": "./find-indesign.sh"
+    "find:indesign": "./find-indesign.sh",
+    "batch:convert": "node scripts/batchConvert.js"
   },
   "keywords": [],
   "author": "",
@@ -24,6 +25,7 @@
     "multer": "^2.0.2",
     "openai": "^6.17.0",
     "pdf2json": "^4.0.2",
-    "uuid": "^13.0.0"
+    "uuid": "^13.0.0",
+    "xlsx": "^0.18.5"
   }
 }
