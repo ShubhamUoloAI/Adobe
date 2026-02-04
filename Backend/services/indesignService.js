@@ -503,19 +503,17 @@ function buildErrorMessage(doc) {
       $.writeln("These fonts will be substituted or loaded during export.\\n");
     }
 
-    // Only report genuinely missing fonts as errors
+    // Log missing fonts as info only - do NOT treat as errors
+    // PDF export will proceed even with missing fonts (they will be substituted)
     if (missingFonts.length > 0) {
-      hasErrors = true;
-      errorMsg += "• Missing Fonts (" + missingFonts.length + "):\\n";
-      errorMsg += "  The following fonts are NOT in your Document fonts folder:\\n\\n";
-
+      $.writeln("\\nINFO: " + missingFonts.length + " missing font(s) detected:");
       for (var i = 0; i < Math.min(missingFonts.length, 10); i++) {
-        errorMsg += "  - " + missingFonts[i] + "\\n";
+        $.writeln("  - " + missingFonts[i]);
       }
-
       if (missingFonts.length > 10) {
-        errorMsg += "  ... and " + (missingFonts.length - 10) + " more\\n";
+        $.writeln("  ... and " + (missingFonts.length - 10) + " more");
       }
+      $.writeln("Fonts will be substituted during PDF export.\\n");
     }
 
     // Check for missing links
@@ -617,33 +615,35 @@ try {
     throw new Error("Failed to open file. It may be corrupt or created in a newer version of InDesign.");
   }
 
-  // For regular documents: check for basic errors (fonts/links)
-  // For books: skip basic checks, we'll run full preflight on all documents
-  if (!isBook) {
-    var errorMessage = buildErrorMessage(doc);
-    if (errorMessage) {
-      doc.close(SaveOptions.NO);
-      app.quit();
-      throw new Error(errorMessage);
-    }
-    $.writeln("✓ Basic error checks passed (fonts/links)");
-    $.writeln("Skipping preflight for regular documents - only running on books");
-  } else {
-    // Run preflight ONLY on books
-    $.writeln("Running preflight check on book...");
-    var preflightErrors = runBookPreflight(book);
+  // Validate document for critical errors BEFORE attempting PDF export
+  // This ensures we fail fast on missing links and other critical issues
+  $.writeln("Validating document for critical errors before PDF export...");
 
-    if (preflightErrors) {
-      $.writeln("\\n❌ PREFLIGHT FAILED:");
-      $.writeln(preflightErrors);
+  if (isBook) {
+    $.writeln("Checking book documents for critical errors...");
+    var bookErrors = runBookPreflight(book);
+    if (bookErrors) {
+      $.writeln("✗ Validation failed - critical errors found");
+      // Close and quit before throwing error
       book.close(SaveOptions.NO);
       app.quit();
-      throw new Error("Preflight Failed:\\n\\n" + preflightErrors);
+      throw new Error("Preflight Failed:\\n\\n" + bookErrors);
     }
-    $.writeln("✓ Preflight passed");
+    $.writeln("✓ Book validation passed - no critical errors");
+  } else {
+    $.writeln("Checking document for critical errors...");
+    var criticalErrors = buildErrorMessage(doc);
+    if (criticalErrors) {
+      $.writeln("✗ Validation failed - critical errors found");
+      // Close and quit before throwing error
+      doc.close(SaveOptions.NO);
+      app.quit();
+      throw new Error(criticalErrors);
+    }
+    $.writeln("✓ Document validation passed - no critical errors");
   }
 
-  // Export to PDF
+  // Validation passed - proceed with PDF export
   var pdfFile = File("${pdfOutputPath.replace(/\\/g, "/")}");
 
   $.writeln("Starting PDF export...");
@@ -663,8 +663,19 @@ try {
       throw new Error("PDF file was not created");
     }
 
-    $.writeln("PDF export completed successfully");
+    $.writeln("✓ PDF export completed successfully");
   } catch (exportErr) {
+    // PDF export failed even after validation passed
+    $.writeln("\\n❌ PDF export failed: " + exportErr.message);
+
+    // Close and quit before throwing error
+    if (isBook) {
+      book.close(SaveOptions.NO);
+    } else {
+      doc.close(SaveOptions.NO);
+    }
+    app.quit();
+
     throw new Error("PDF export failed: " + exportErr.message);
   }
 
