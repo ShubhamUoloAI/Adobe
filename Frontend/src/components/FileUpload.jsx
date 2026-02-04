@@ -60,16 +60,22 @@ export default function FileUpload() {
         setProgress(percentCompleted);
       });
 
-      // Download the PDF
-      const filename = file.name.replace('.zip', '.pdf');
-      downloadFile(pdfBlob, filename);
+      // Only download PDF if conversion was successful (no preflight errors)
+      if (pdfBlob && pdfBlob.size > 0) {
+        const filename = file.name.replace('.zip', '.pdf');
+        downloadFile(pdfBlob, filename);
 
-      setSuccess(true);
-      setFile(null);
-      if (fileInputRef.current) {
-        fileInputRef.current.value = '';
+        setSuccess(true);
+        setFile(null);
+        if (fileInputRef.current) {
+          fileInputRef.current.value = '';
+        }
+      } else {
+        throw new Error('PDF conversion failed - no file generated');
       }
     } catch (err) {
+      // Preflight errors and other conversion errors are caught here
+      // No PDF will be downloaded
       setError(err.message);
     } finally {
       setUploading(false);
@@ -127,7 +133,7 @@ export default function FileUpload() {
             <svg className="message-icon" fill="currentColor" viewBox="0 0 20 20">
               <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clipRule="evenodd" />
             </svg>
-            {error}
+            <div style={{ whiteSpace: 'pre-wrap' }}>{error}</div>
           </div>
         )}
 

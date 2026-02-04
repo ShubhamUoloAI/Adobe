@@ -64,10 +64,14 @@ export async function uploadAndConvertToPDF(file, onUploadProgress) {
         const text = await error.response.data.text();
         const errorData = JSON.parse(text);
         const errorMessage = errorData.message || errorData.error || 'Server error';
-        throw new Error(cleanErrorMessage(errorMessage));
+        // Don't clean preflight errors - they're already well-formatted
+        const isPreflight = errorData.isPreflight || errorMessage.includes('Preflight Failed');
+        throw new Error(isPreflight ? errorMessage : cleanErrorMessage(errorMessage));
       } else {
         const errorMessage = error.response.data.message || error.response.data.error || 'Server error';
-        throw new Error(cleanErrorMessage(errorMessage));
+        // Don't clean preflight errors - they're already well-formatted
+        const isPreflight = error.response.data.isPreflight || errorMessage.includes('Preflight Failed');
+        throw new Error(isPreflight ? errorMessage : cleanErrorMessage(errorMessage));
       }
     } else if (error.request) {
       // Request made but no response

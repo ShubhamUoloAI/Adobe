@@ -77,8 +77,13 @@ router.post('/upload', upload.single('file'), async (req, res) => {
       pdfPath = await convertInDesignToPDF(result.indesignFile, extractPath, result.availableFontNames || []);
       console.log(`PDF generated: ${pdfPath}`);
     } catch (conversionError) {
-      // Check if this is a font missing error
-      if (conversionError.code === 'INDESIGN_CONVERSION_FAILED' && conversionError.message.includes('Missing Fonts')) {
+      // Check if this is a font missing error or preflight error
+      if (conversionError.code === 'INDESIGN_CONVERSION_FAILED' &&
+          (conversionError.message.includes('Missing Fonts') || conversionError.message.includes('Preflight Failed'))) {
+
+        // Store the original error message to show to user if retry fails
+        const originalErrorMessage = conversionError.message;
+
         console.log('\n⚠ Font missing detected. Attempting to download missing fonts...');
         console.log('Error message:', conversionError.message);
 
@@ -122,9 +127,14 @@ router.post('/upload', upload.single('file'), async (req, res) => {
           pdfPath = await convertInDesignToPDF(result.indesignFile, extractPath, result.availableFontNames || []);
           console.log(`✓ PDF generated successfully on retry: ${pdfPath}`);
         } catch (retryError) {
-          // Retry failed - return error to frontend
+          // Retry failed - throw the ORIGINAL error with preflight details, not the retry error
           console.error('✗ PDF conversion failed on retry:', retryError.message);
-          throw retryError;
+          console.log('⚠ Returning original preflight error to user');
+
+          // Throw the original error which has the detailed preflight information
+          const originalError = new Error(originalErrorMessage);
+          originalError.code = 'INDESIGN_CONVERSION_FAILED';
+          throw originalError;
         }
       } else {
         // Not a font error, re-throw
@@ -149,12 +159,16 @@ router.post('/upload', upload.single('file'), async (req, res) => {
     // Clean up temporary files on error (but NOT fonts - they stay permanently)
     await cleanupFiles([uploadedFilePath, extractPath, pdfPath]);
 
-    // Handle InDesign conversion errors
+    // Handle InDesign conversion errors (including preflight failures)
     if (error.code === 'INDESIGN_CONVERSION_FAILED') {
+      // Check if this is a preflight error
+      const isPreflightError = error.message.includes('Preflight Failed');
+
       return res.status(422).json({
-        error: 'InDesign Conversion Failed',
+        error: isPreflightError ? 'Preflight Check Failed' : 'InDesign Conversion Failed',
         message: error.message,
-        code: error.code
+        code: error.code,
+        isPreflight: isPreflightError
       });
     }
 

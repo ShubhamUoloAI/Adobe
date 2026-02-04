@@ -516,24 +516,6 @@ function buildErrorMessage(doc) {
       if (missingFonts.length > 10) {
         errorMsg += "  ... and " + (missingFonts.length - 10) + " more\\n";
       }
-
-      errorMsg += "\\n";
-      errorMsg += "Solutions:\\n";
-      errorMsg += "  1. Add the missing font files to the 'Document fonts' folder in your zip file\\n";
-      errorMsg += "  2. Replace the fonts in your InDesign document with available alternatives\\n";
-
-      if (availableFonts && availableFonts.length > 0) {
-        errorMsg += "\\n";
-        errorMsg += "Available fonts in your Document fonts folder:\\n";
-        for (var j = 0; j < Math.min(availableFonts.length, 10); j++) {
-          errorMsg += "  ✓ " + availableFonts[j] + "\\n";
-        }
-        if (availableFonts.length > 10) {
-          errorMsg += "  ... and " + (availableFonts.length - 10) + " more\\n";
-        }
-      }
-
-      errorMsg += "\\n";
     }
 
     // Check for missing links
@@ -590,7 +572,6 @@ function buildErrorMessage(doc) {
   }
 
   if (hasErrors) {
-    errorMsg += "\\nPlease fix these issues in InDesign before converting to PDF.";
     return errorMsg;
   }
 
@@ -600,9 +581,13 @@ function buildErrorMessage(doc) {
 try {
   $.writeln("Starting InDesign conversion script...");
 
-  // Don't set userInteractionLevel - let InDesign use default behavior
-  // Setting it to NEVER_INTERACT causes "script error" on documents with warnings
-  $.writeln("Skipping userInteractionLevel setting to avoid script errors");
+  // Suppress dialogs - use camelCase for InDesign 2026
+  try {
+    app.scriptPreferences.userInteractionLevel = UserInteractionLevels.neverInteract;
+    $.writeln("Set userInteractionLevel to neverInteract");
+  } catch (e) {
+    $.writeln("Could not set userInteractionLevel: " + e.message);
+  }
 
   $.writeln("Opening InDesign file...");
 
