@@ -208,3 +208,6 @@ batchConvert()
     console.error('\n❌ Batch conversion failed:', error);
     process.exit(1);
   });
+
+
+  // use: npm run batch:convert
