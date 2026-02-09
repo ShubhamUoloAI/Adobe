@@ -327,45 +327,36 @@ tell application "System Events"
 		-- Wait for comparison to complete (may take a while)
 		delay 30
 
-		-- Save the comparison report
-		log "Saving comparison report..."
-		-- Press Command+S to open save dialog
+		-- Save the comparison result
+		log "Pressing Cmd+S to save..."
 		key code 1 using {command down}
-		delay 5
+		delay 1
 
-		-- Press Command+Shift+G to open "Go to folder" dialog
-		log "Opening Go to folder dialog..."
+		-- Press Enter
+		log "Pressing Enter..."
+		key code 36
+		delay 1
+
+		-- Open Go to folder dialog
+		log "Pressing Cmd+Shift+G to open Go to folder..."
 		key code 5 using {command down, shift down}
-		delay 3
+		delay 1
 
-		-- Wait for dialog to appear
-		delay 2
-
-		-- Clear any existing text in the path field
-		log "Clearing path field..."
-		key code 0 using {command down}
+		-- Type destination folder path
+		log "Typing destination folder path..."
+		keystroke "/Users/shubham/Downloads/Uolo-pdf/Report"
 		delay 0.5
 
-		-- Type the destination folder path
-		log "Typing folder path: " & outputFolder
-		keystroke outputFolder
-		delay 3
-
 		-- Press Enter to navigate to folder
-		log "Navigating to folder..."
+		log "Pressing Enter to navigate to folder..."
 		key code 36
-		delay 3
+		delay 0.5
 
-		-- Now type just the filename in the filename field (should be focused by default)
-		log "Typing filename..."
-		-- Extract just the filename from outputPath
-		keystroke "comparison-report.pdf"
-		delay 2
-
-		-- Press Enter to save
-		log "Saving file..."
+		-- Press Enter again to confirm
+		log "Pressing Enter again to confirm..."
 		key code 36
-		delay 3
+		delay 1
+
 
 	end tell
 end tell

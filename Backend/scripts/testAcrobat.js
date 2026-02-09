@@ -8,7 +8,7 @@ async function testAcrobatComparison() {
   // Update these paths to your actual PDF files
   const pdf1 = '/Users/shubham/Downloads/Uolo-pdf/untitled folder/correct.pdf';
   const pdf2 = '/Users/shubham/Downloads/Uolo-pdf/untitled folder/error.pdf';
-  const outputDir = '/Users/shubham/Downloads/Uolo-pdf/untitled folder/comparison-output';
+  const outputDir = '/Users/shubham/Downloads/Uolo-pdf/Report';
 
   console.log('PDF 1:', pdf1);
   console.log('PDF 2:', pdf2);
