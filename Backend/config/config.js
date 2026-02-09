@@ -30,6 +30,12 @@ const config = {
     timeoutMs: parseInt(process.env.COMPARISON_TIMEOUT_MS || '300000', 10),
     tempPdfPath: path.join(__dirname, '..', './temp/pdfs'),
   },
+
+  // Adobe Acrobat configuration
+  acrobat: {
+    appPath: process.env.ACROBAT_APP_PATH || '/Applications/Adobe Acrobat DC/Adobe Acrobat.app',
+    timeoutMs: parseInt(process.env.ACROBAT_TIMEOUT_MS || '300000', 10),
+  },
 };
 
 export default config;

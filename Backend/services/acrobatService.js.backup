@@ -1,0 +1,394 @@
+import { spawn } from 'child_process';
+import fs from 'fs/promises';
+import path from 'path';
+import config from '../config/config.js';
+
+/**
+ * Compares two PDF files using Adobe Acrobat DC
+ * @param {string} pdf1Path - Path to the first PDF file
+ * @param {string} pdf2Path - Path to the second PDF file
+ * @param {string} outputDir - Directory to save the comparison PDF
+ * @returns {Promise<string>} - Path to the generated comparison PDF file
+ */
+export async function comparePDFsWithAcrobat(pdf1Path, pdf2Path, outputDir) {
+  console.log('[Acrobat Debug] =================================');
+  console.log('[Acrobat Debug] Starting PDF comparison');
+  console.log('[Acrobat Debug] =================================');
+
+  try {
+    console.log('[Acrobat Debug] Checking if input files exist...');
+    // Verify both PDF files exist
+    const file1Exists = await checkFileExists(pdf1Path);
+    const file2Exists = await checkFileExists(pdf2Path);
+
+    console.log('[Acrobat Debug] File 1 exists:', file1Exists);
+    console.log('[Acrobat Debug] File 2 exists:', file2Exists);
+
+    if (!file1Exists) {
+      const error = new Error(`First PDF file not found: ${pdf1Path}`);
+      error.code = 'FILE_NOT_FOUND';
+      throw error;
+    }
+
+    if (!file2Exists) {
+      const error = new Error(`Second PDF file not found: ${pdf2Path}`);
+      error.code = 'FILE_NOT_FOUND';
+      throw error;
+    }
+
+    // Generate output PDF path
+    const timestamp = Date.now();
+    const comparisonPdfPath = path.join(outputDir, `comparison-${timestamp}.pdf`);
+
+    console.log('[Acrobat Debug] Output PDF will be:', comparisonPdfPath);
+
+    // Ensure output directory exists
+    await fs.mkdir(outputDir, { recursive: true });
+    console.log('[Acrobat Debug] Output directory created/verified');
+
+    // Execute Acrobat comparison
+    console.log('[Acrobat Debug] Calling executeAcrobatComparison...');
+    await executeAcrobatComparison(pdf1Path, pdf2Path, comparisonPdfPath);
+    console.log('[Acrobat Debug] executeAcrobatComparison completed');
+
+    // Verify comparison PDF was created
+    console.log('[Acrobat Debug] Checking if output file was created...');
+    const comparisonExists = await checkFileExists(comparisonPdfPath);
+    console.log('[Acrobat Debug] Output file exists:', comparisonExists);
+
+    if (!comparisonExists) {
+      const error = new Error('Comparison PDF was not generated successfully');
+      error.code = 'PDF_NOT_GENERATED';
+      throw error;
+    }
+
+    console.log('[Acrobat Debug] =================================');
+    console.log('[Acrobat Debug] Comparison successful!');
+    console.log('[Acrobat Debug] =================================');
+
+    return comparisonPdfPath;
+  } catch (error) {
+    // Mark as Acrobat error if not already marked
+    if (!error.code) {
+      error.code = 'ACROBAT_ERROR';
+    }
+    throw error;
+  }
+}
+
+/**
+ * Executes Acrobat comparison using JavaScript API via AppleScript
+ * @param {string} pdf1Path - Path to the first PDF
+ * @param {string} pdf2Path - Path to the second PDF
+ * @param {string} outputPath - Path where comparison PDF should be saved
+ */
+async function executeAcrobatComparison(pdf1Path, pdf2Path, outputPath) {
+  console.log('[Acrobat Debug] Starting comparison execution');
+  console.log('[Acrobat Debug] Input PDF 1:', pdf1Path);
+  console.log('[Acrobat Debug] Input PDF 2:', pdf2Path);
+  console.log('[Acrobat Debug] Output path:', outputPath);
+
+  // Get absolute paths
+  const absPdf1 = path.resolve(pdf1Path);
+  const absPdf2 = path.resolve(pdf2Path);
+  const absOutput = path.resolve(outputPath);
+
+  console.log('[Acrobat Debug] Absolute PDF 1:', absPdf1);
+  console.log('[Acrobat Debug] Absolute PDF 2:', absPdf2);
+  console.log('[Acrobat Debug] Absolute output:', absOutput);
+
+  // Create AppleScript to automate Acrobat UI using cliclick for coordinate-based clicking
+  const appleScript = `
+-- Properly escape paths for AppleScript
+set pdf1Path to POSIX file "${absPdf1.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"
+set pdf2Path to POSIX file "${absPdf2.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"
+set outputPath to "${absOutput.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"
+
+-- Launch Acrobat (don't open PDF yet - need clean home screen)
+tell application "Adobe Acrobat"
+\tlaunch
+\tactivate
+\tdelay 8
+end tell
+
+tell application "System Events"
+\ttell process "Acrobat"
+\t\t-- Ensure Acrobat is frontmost
+\t\tset frontmost to true
+\t\tdelay 3
+\t\t
+\t\t-- Wait for window to be available (wait longer)
+\t\trepeat 15 times
+\t\t\tif (count of windows) > 0 then
+\t\t\t\tlog "Found " & (count of windows) & " window(s)"
+\t\t\t\texit repeat
+\t\t\tend if
+\t\t\tlog "Waiting for window... attempt " & (16 - 15) as string
+\t\t\tdelay 1
+\t\tend repeat
+\t\t
+\t\tif (count of windows) = 0 then
+\t\t\tlog "ERROR: No Acrobat windows found"
+\t\t\terror "Acrobat window not available"
+\t\tend if
+\t\t
+\t\t-- Get window position and size for coordinate calculation
+\t\tset win to window 1
+\t\tset winPosition to position of win
+\t\tset winSize to size of win
+\t\t
+\t\tset winX to item 1 of winPosition
+\t\tset winY to item 2 of winPosition
+\t\tset winWidth to item 1 of winSize
+\t\tset winHeight to item 2 of winSize
+\t\t
+\t\tlog "Window position: " & winX & ", " & winY
+\t\tlog "Window size: " & winWidth & " x " & winHeight
+\t\t
+\t\t-- Calculate "See all tools" button position
+\t\t-- Tested and verified: 120 pixels from right edge, 140 pixels from top
+\t\tset seeAllToolsX to winX + winWidth - 120
+\t\tset seeAllToolsY to winY + 140
+\t\t
+\t\tlog "Clicking 'See all tools' at: " & seeAllToolsX & "," & seeAllToolsY
+\t\t
+\t\t-- Click "See all tools" button
+\t\tdo shell script "/opt/homebrew/bin/cliclick c:" & seeAllToolsX & "," & seeAllToolsY
+\t\tlog "Clicked 'See all tools' button"
+\t\tdelay 4
+\t\t
+\t\tlog "Tools panel should have opened in the same window"
+\t\t
+\t\t-- The tools panel opens in the SAME window, changing the window title to "All tools"
+\t\t-- Wait a moment for the content to load
+\t\tdelay 2
+\t\t
+\t\t-- Check if window title changed to "All tools"
+\t\tset currentWindowName to name of win
+\t\tlog "Current window name: " & currentWindowName
+\t\t
+\t\t-- Use the same window (win) for tools panel
+\t\tset toolsWinPos to position of win
+\t\tset toolsWinSize to size of win
+\t\t
+\t\tset toolsX to item 1 of toolsWinPos
+\t\tset toolsY to item 2 of toolsWinPos
+\t\tset toolsWidth to item 1 of toolsWinSize
+\t\tset toolsHeight to item 2 of toolsWinSize
+\t\t
+\t\tlog "Tools panel - Position: " & toolsX & "," & toolsY & " Size: " & toolsWidth & "x" & toolsHeight
+\t\t
+\t\t-- Use search box to find Compare Files instead of scrolling
+\t\tlog "Using search box to find Compare Files..."
+\t\t
+\t\t-- Click in the search box "Find any tool" at the top
+\t\t-- Search box is centered horizontally, about 150px from top
+\t\tset searchX to (toolsX + (toolsWidth / 2)) as integer
+\t\tset searchY to (toolsY + 150) as integer
+\t\t
+\t\tlog "Clicking search box at: " & searchX & "," & searchY
+\t\tdo shell script "/opt/homebrew/bin/cliclick c:" & searchX & "," & searchY
+\t\tdelay 1
+\t\t
+\t\t-- Clear search box using triple-click and typing over
+\t\tlog "Selecting all text in search box with triple-click..."
+\t\tdo shell script "/opt/homebrew/bin/cliclick tc:" & searchX & "," & searchY
+\t\tdelay 0.5
+\t\t
+\t\t-- Type "compare" to filter tools (replaces selected text)
+\t\tlog "Typing 'compare' in search box..."
+\t\tdo shell script "/opt/homebrew/bin/cliclick t:compare"
+\t\tdelay 4
+\t\t
+\t\tlog "Waiting for search results to fully load..."
+\t\tdelay 2
+\t\t
+\t\tlog "Double-clicking on 'Compare Files' tool to open it"
+\t\t
+\t\t-- Double-click on the Compare Files tool (icon/text area)
+\t\t-- Centered horizontally, around 268px from window top
+\t\tset compareX to (toolsX + (toolsWidth / 2)) as integer
+\t\tset compareY to (toolsY + 268) as integer
+\t\t
+\t\tlog "Double-clicking 'Compare Files' at: " & compareX & "," & compareY
+\t\tdo shell script "/opt/homebrew/bin/cliclick dc:" & compareX & "," & compareY
+\t\tlog "Double-clicked 'Compare Files' - tool should now open"
+\t\tdelay 5
+\t\t
+\tend tell
+end tell
+
+log "Compare Files tool accessed"
+return "COMPLETED"
+`;
+
+  console.log('[Acrobat Debug] AppleScript prepared');
+  console.log('[Acrobat Debug] AppleScript length:', appleScript.length);
+
+  // Write AppleScript to a file to avoid command-line escaping issues with paths containing spaces
+  const appleScriptPath = path.join(path.dirname(outputPath), `acrobat-applescript-${Date.now()}.applescript`);
+  console.log('[Acrobat Debug] Writing AppleScript to file:', appleScriptPath);
+
+  return new Promise(async (resolve, reject) => {
+    const timeoutMs = config.acrobat?.timeoutMs || 300000; // 5 minutes default
+    let timedOut = false;
+
+    try {
+      // Write AppleScript to file
+      await fs.writeFile(appleScriptPath, appleScript, 'utf8');
+      console.log('[Acrobat Debug] AppleScript file written successfully');
+    } catch (writeError) {
+      console.log('[Acrobat Debug] Failed to write AppleScript file:', writeError.message);
+      reject(writeError);
+      return;
+    }
+
+    console.log('[Acrobat Debug] Setting up execution with timeout:', timeoutMs / 1000, 'seconds');
+
+    // Set timeout
+    const timeout = setTimeout(() => {
+      console.log('[Acrobat Debug] TIMEOUT reached!');
+      timedOut = true;
+      child.kill('SIGTERM');
+      const error = new Error(`Acrobat comparison timed out after ${timeoutMs / 1000} seconds`);
+      error.code = 'TIMEOUT';
+      reject(error);
+    }, timeoutMs);
+
+    console.log('[Acrobat Debug] Spawning osascript process...');
+
+    // Execute AppleScript file via osascript
+    const child = spawn('osascript', [appleScriptPath]);
+
+    let stdout = '';
+    let stderr = '';
+
+    child.stdout.on('data', (data) => {
+      const chunk = data.toString();
+      console.log('[Acrobat Debug] stdout chunk:', chunk);
+      stdout += chunk;
+    });
+
+    child.stderr.on('data', (data) => {
+      const chunk = data.toString();
+      console.log('[Acrobat Debug] stderr chunk:', chunk);
+      stderr += chunk;
+    });
+
+    child.on('error', (error) => {
+      console.log('[Acrobat Debug] Process error event:', error.message);
+      clearTimeout(timeout);
+      if (!timedOut) {
+        error.message = `Failed to execute AppleScript: ${error.message}`;
+        error.code = 'APPLESCRIPT_ERROR';
+        reject(error);
+      }
+    });
+
+    child.on('close', (code) => {
+      console.log('[Acrobat Debug] Process closed with code:', code);
+      clearTimeout(timeout);
+
+      if (timedOut) {
+        console.log('[Acrobat Debug] Ignoring close event - already timed out');
+        return; // Already handled by timeout
+      }
+
+      // Log output
+      if (stdout) {
+        console.log('[Acrobat Output]', stdout);
+      }
+      if (stderr) {
+        console.error('[Acrobat Error]', stderr);
+      }
+
+      console.log('[Acrobat Debug] Full stdout length:', stdout.length);
+      console.log('[Acrobat Debug] Full stderr length:', stderr.length);
+
+      // Check if comparison failed
+      const hasError = stdout.includes('ERROR:') || stdout.includes('COMPARISON_FAILED') || stderr.includes('error');
+
+      if (code !== 0 || hasError) {
+        console.log('[Acrobat Debug] Failure detected - code:', code, 'hasError:', hasError);
+        console.log('[Acrobat Debug] AppleScript file saved at:', appleScriptPath);
+
+        // Provide more detailed error message
+        let errorMsg = `Acrobat comparison failed with code ${code}.`;
+        if (stdout) {
+          errorMsg += ` Output: ${stdout}`;
+        }
+        if (stderr) {
+          errorMsg += ` Error: ${stderr}`;
+        }
+
+        // Check for common issues
+        if (stderr.includes('syntax error') || stdout.includes('syntax error')) {
+          errorMsg += '\nTip: There may be an issue with the JavaScript syntax.';
+        }
+        if (stderr.includes('not allowed') || stdout.includes('not allowed')) {
+          errorMsg += '\nTip: Check Acrobat security preferences. Go to Preferences > JavaScript and enable JavaScript.';
+        }
+        if (stdout.includes('comparePages') || stderr.includes('comparePages')) {
+          errorMsg += '\nTip: The comparePages API might not be available in your Acrobat version.';
+        }
+
+        const error = new Error(errorMsg);
+        error.code = 'ACROBAT_EXECUTION_FAILED';
+        console.log('[Acrobat Debug] Rejecting with error:', errorMsg);
+        reject(error);
+      } else {
+        console.log('[Acrobat Debug] Success! Exit code 0');
+        console.log('[Acrobat Debug] Waiting 10 seconds for file to be written...');
+        // Give Acrobat additional time to finish writing the comparison file
+        setTimeout(() => {
+          console.log('[Acrobat Debug] Resolving promise');
+
+          // Clean up AppleScript file (non-blocking)
+          fs.unlink(appleScriptPath).then(() => {
+            console.log('[Acrobat Debug] Cleaned up AppleScript file');
+          }).catch((err) => {
+            console.log('[Acrobat Debug] Failed to cleanup AppleScript file:', err.message);
+          });
+
+          resolve();
+        }, 10000);
+      }
+    });
+  });
+}
+
+/**
+ * Checks if a file exists
+ * @param {string} filePath - Path to check
+ * @returns {Promise<boolean>} - True if file exists
+ */
+async function checkFileExists(filePath) {
+  try {
+    await fs.access(filePath);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Checks if Adobe Acrobat is installed
+ * @returns {Promise<boolean>} - True if Acrobat is found
+ */
+export async function checkAcrobatInstallation() {
+  try {
+    const acrobatPath = config.acrobat?.appPath || '/Applications/Adobe Acrobat DC/Adobe Acrobat.app';
+    const exists = await checkFileExists(acrobatPath);
+    return exists;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Gets Acrobat installation path
+ * @returns {string} - Path to Acrobat application
+ */
+export function getAcrobatPath() {
+  return config.acrobat?.appPath || '/Applications/Adobe Acrobat DC/Adobe Acrobat.app';
+}

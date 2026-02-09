@@ -4,6 +4,7 @@ import fs from 'fs/promises';
 import config from './config/config.js';
 import uploadRouter from './routes/upload.js';
 import compareRouter from './routes/compare.js';
+import acrobatCompareRouter from './routes/acrobatCompare.js';
 import { testInDesignConnection } from './services/indesignService.js';
 import { cleanupOldFiles } from './utils/fileCleanup.js';
 
@@ -27,6 +28,7 @@ app.get('/health', (req, res) => {
 // API routes
 app.use('/api', uploadRouter);
 app.use('/api', compareRouter);
+app.use('/api', acrobatCompareRouter);
 
 // 404 handler
 app.use((req, res) => {
@@ -88,6 +90,7 @@ async function initializeServer() {
       console.log(`\n✓ Server running on http://localhost:${config.port}`);
       console.log(`✓ Upload endpoint: http://localhost:${config.port}/api/upload`);
       console.log(`✓ PDF comparison: http://localhost:${config.port}/api/compare-pdfs`);
+      console.log(`✓ Acrobat compare: http://localhost:${config.port}/api/acrobat-compare`);
       console.log(`✓ Health check: http://localhost:${config.port}/health\n`);
     });
 

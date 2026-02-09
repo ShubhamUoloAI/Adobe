@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import FileUpload from './components/FileUpload'
 import PdfComparison from './components/PdfComparison'
+import AcrobatComparison from './components/AcrobatComparison'
 import './App.css'
 
 function App() {
@@ -21,10 +22,18 @@ function App() {
         >
           PDF Comparison
         </button>
+        <button
+          className={`nav-tab ${activeTab === 'acrobat' ? 'active' : ''}`}
+          onClick={() => setActiveTab('acrobat')}
+        >
+          Acrobat PDF Compare
+        </button>
       </nav>
 
       <div className="app-content">
-        {activeTab === 'converter' ? <FileUpload /> : <PdfComparison />}
+        {activeTab === 'converter' && <FileUpload />}
+        {activeTab === 'comparison' && <PdfComparison />}
+        {activeTab === 'acrobat' && <AcrobatComparison />}
       </div>
     </div>
   )
