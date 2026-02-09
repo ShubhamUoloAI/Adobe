@@ -8,9 +8,10 @@ import config from '../config/config.js';
  * @param {string} pdf1Path - Path to the first PDF file
  * @param {string} pdf2Path - Path to the second PDF file
  * @param {string} outputDir - Directory to save the comparison PDF
+ * @param {string} mode - Comparison mode: "Complete" or "Text Only" (default: "Complete")
  * @returns {Promise<string>} - Path to the generated comparison PDF file
  */
-export async function comparePDFsWithAcrobat(pdf1Path, pdf2Path, outputDir) {
+export async function comparePDFsWithAcrobat(pdf1Path, pdf2Path, outputDir, mode = 'Complete') {
   console.log('[Acrobat Debug] =================================');
   console.log('[Acrobat Debug] Starting PDF comparison');
   console.log('[Acrobat Debug] =================================');
@@ -45,10 +46,11 @@ export async function comparePDFsWithAcrobat(pdf1Path, pdf2Path, outputDir) {
     // Ensure output directory exists
     await fs.mkdir(outputDir, { recursive: true });
     console.log('[Acrobat Debug] Output directory created/verified');
+    console.log('[Acrobat Debug] Comparison mode:', mode);
 
     // Execute Acrobat comparison
     console.log('[Acrobat Debug] Calling executeAcrobatComparison...');
-    await executeAcrobatComparison(pdf1Path, pdf2Path, comparisonPdfPath);
+    await executeAcrobatComparison(pdf1Path, pdf2Path, comparisonPdfPath, mode);
     console.log('[Acrobat Debug] executeAcrobatComparison completed');
 
     // Verify comparison PDF was created
@@ -81,8 +83,9 @@ export async function comparePDFsWithAcrobat(pdf1Path, pdf2Path, outputDir) {
  * @param {string} pdf1Path - Path to the first PDF
  * @param {string} pdf2Path - Path to the second PDF
  * @param {string} outputPath - Path where comparison PDF should be saved
+ * @param {string} mode - Comparison mode: "Complete" or "Text Only"
  */
-async function executeAcrobatComparison(pdf1Path, pdf2Path, outputPath) {
+async function executeAcrobatComparison(pdf1Path, pdf2Path, outputPath, mode = 'Complete') {
   console.log('[Acrobat Debug] Starting comparison execution');
   console.log('[Acrobat Debug] Input PDF 1:', pdf1Path);
   console.log('[Acrobat Debug] Input PDF 2:', pdf2Path);
@@ -97,7 +100,7 @@ async function executeAcrobatComparison(pdf1Path, pdf2Path, outputPath) {
   console.log('[Acrobat Debug] Absolute PDF 1:', absPdf1);
   console.log('[Acrobat Debug] Absolute PDF 2:', absPdf2);
   console.log('[Acrobat Debug] Absolute output:', absOutput);
-  console.log('[Acrobat Debug] Absolute output folder:', absOutputFolder);
+  console.log('[Acrobat Debug] Absolute output folder (will be used in save dialog):', absOutputFolder);
 
   // Create AppleScript to automate Acrobat UI using cliclick for coordinate-based clicking
   const appleScript = `
@@ -106,6 +109,7 @@ set pdf1Path to POSIX file "${absPdf1.replace(/\\/g, '\\\\').replace(/"/g, '\\"'
 set pdf2Path to POSIX file "${absPdf2.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"
 set outputPath to "${absOutput.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"
 set outputFolder to "${absOutputFolder.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"
+set comparisonMode to "${mode.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"
 
 -- Launch Acrobat (don't open PDF yet - need clean home screen)
 tell application "Adobe Acrobat"
@@ -311,16 +315,61 @@ tell application "System Events"
 		key code 36
 		delay 2
 
-		-- Now click the "Compare" button using Tab navigation
-		log "Clicking Compare button..."
-		-- Tab 6 times to reach Compare button
-		repeat 6 times
-			key code 48
-			delay 0.3
-		end repeat
-		-- Press Enter to click Compare
-		key code 36
-		delay 10
+		-- Click the Compare button based on mode
+		log "Comparison mode: " & comparisonMode
+
+		if comparisonMode is "Text Only" then
+			log "Using Text Only comparison mode..."
+
+			-- Tab 4 times to reach Compare Text Only button
+			log "Tabbing 4 times to Compare Text Only button..."
+			repeat 4 times
+				key code 48
+				delay 0.3
+			end repeat
+
+			-- Get window position for mouse click
+			set win to window 1
+			set winPosition to position of win
+			set winSize to size of win
+
+			set winX to item 1 of winPosition
+			set winY to item 2 of winPosition
+
+			log "Window position for click: " & winX & "," & winY
+
+			-- Click the Compare Text Only button using cliclick at current focus position
+			-- The button should be at the focused element, so we'll click at a relative position
+			log "Clicking Compare Text Only button..."
+			key code 49 -- Space bar to click the focused button
+			delay 3
+
+			-- Tab 2 more times
+			log "Tabbing 2 more times..."
+			repeat 2 times
+				key code 48
+				delay 0.3
+			end repeat
+
+			-- Press Enter
+			log "Pressing Enter to start comparison..."
+			key code 36
+			delay 10
+		else
+			log "Using Complete comparison mode..."
+
+			-- Tab 6 times to reach Compare button
+			log "Tabbing 6 times to Compare button..."
+			repeat 6 times
+				key code 48
+				delay 0.3
+			end repeat
+
+			-- Press Enter to click Compare
+			log "Pressing Enter to start comparison..."
+			key code 36
+			delay 10
+		end if
 
 		log "Comparison started, waiting for it to complete..."
 
@@ -343,8 +392,8 @@ tell application "System Events"
 		delay 1
 
 		-- Type destination folder path
-		log "Typing destination folder path..."
-		keystroke "/Users/shubham/Downloads/Uolo-pdf/Report"
+		log "Typing destination folder path: " & outputFolder
+		keystroke outputFolder
 		delay 0.5
 
 		-- Press Enter to navigate to folder
@@ -360,6 +409,13 @@ tell application "System Events"
 
 	end tell
 end tell
+
+-- Quit Adobe Acrobat after completion
+log "Quitting Adobe Acrobat..."
+tell application "Adobe Acrobat"
+	quit
+end tell
+delay 2
 
 log "Comparison completed and saved"
 return "COMPLETED"
