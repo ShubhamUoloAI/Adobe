@@ -105,8 +105,8 @@ async function executeAcrobatComparison(pdf1Path, pdf2Path, outputPath, mode = '
   // Create AppleScript to automate Acrobat UI using cliclick for coordinate-based clicking
   const appleScript = `
 -- Properly escape paths for AppleScript
-set pdf1Path to POSIX file "${absPdf1.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"
-set pdf2Path to POSIX file "${absPdf2.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"
+set pdf1PathString to "${absPdf1.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"
+set pdf2PathString to "${absPdf2.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"
 set outputPath to "${absOutput.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"
 set outputFolder to "${absOutputFolder.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"
 set comparisonMode to "${mode.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"
@@ -249,25 +249,13 @@ tell application "System Events"
 		key code 0 using {command down}
 		delay 0.5
 
-		-- Type only the FOLDER path (not the full file path)
-		set pdf2Folder to do shell script "dirname " & quoted form of "${absPdf2}"
-		set pdf2Name to do shell script "basename " & quoted form of "${absPdf2}"
-		log "Typing folder path: " & pdf2Folder
-		keystroke pdf2Folder
+		-- Type the FULL file path (including filename)
+		log "Typing full file path: " & pdf2PathString
+		keystroke pdf2PathString
 		delay 2
 
-		-- Press Enter to navigate to the folder
-		log "Pressing Enter to navigate to folder..."
-		key code 36
-		delay 3
-
-		-- Now type the filename in the file picker's filename field
-		log "Typing filename: " & pdf2Name
-		keystroke pdf2Name
-		delay 2
-
-		-- Press Enter to select the file and click "Open" button
-		log "Pressing Enter to confirm selection..."
+		-- Press Enter to select the file directly
+		log "Pressing Enter to open file..."
 		key code 36
 		delay 2
 
@@ -293,25 +281,13 @@ tell application "System Events"
 		key code 0 using {command down}
 		delay 0.5
 
-		-- Type only the FOLDER path (not the full file path)
-		set pdf1Folder to do shell script "dirname " & quoted form of "${absPdf1}"
-		set pdf1Name to do shell script "basename " & quoted form of "${absPdf1}"
-		log "Typing folder path: " & pdf1Folder
-		keystroke pdf1Folder
+		-- Type the FULL file path (including filename)
+		log "Typing full file path: " & pdf1PathString
+		keystroke pdf1PathString
 		delay 2
 
-		-- Press Enter to navigate to the folder
-		log "Pressing Enter to navigate to folder..."
-		key code 36
-		delay 3
-
-		-- Now type the filename in the file picker's filename field
-		log "Typing filename: " & pdf1Name
-		keystroke pdf1Name
-		delay 2
-
-		-- Press Enter to select the file and click "Open" button
-		log "Pressing Enter to confirm selection..."
+		-- Press Enter to select the file directly
+		log "Pressing Enter to open file..."
 		key code 36
 		delay 2
 
