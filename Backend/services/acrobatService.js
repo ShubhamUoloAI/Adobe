@@ -254,8 +254,13 @@ tell application "System Events"
 		keystroke pdf2PathString
 		delay 2
 
-		-- Press Enter to select the file directly
-		log "Pressing Enter to open file..."
+		-- Press Enter first time
+		log "Pressing Enter (first time)..."
+		key code 36
+		delay 0.5
+
+		-- Press Enter second time to actually open/add the file
+		log "Pressing Enter (second time) to add file..."
 		key code 36
 		delay 2
 
@@ -286,8 +291,13 @@ tell application "System Events"
 		keystroke pdf1PathString
 		delay 2
 
-		-- Press Enter to select the file directly
-		log "Pressing Enter to open file..."
+		-- Press Enter first time
+		log "Pressing Enter (first time)..."
+		key code 36
+		delay 0.5
+
+		-- Press Enter second time to actually open/add the file
+		log "Pressing Enter (second time) to add file..."
 		key code 36
 		delay 2
 
