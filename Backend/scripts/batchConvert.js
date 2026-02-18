@@ -6,10 +6,41 @@ import { extractZipAndFindInDesignFile, isValidZipFile } from '../services/zipHa
 import { convertInDesignToPDF } from '../services/indesignService.js';
 import { fileURLToPath } from 'url';
 import { dirname } from 'path';
-import { execSync } from 'child_process';
+import { execSync, exec } from 'child_process';
+import { promisify } from 'util';
+
+const execAsync = promisify(exec);
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
+
+/**
+ * Close Adobe InDesign completely
+ * @returns {Promise<void>}
+ */
+async function closeInDesign() {
+  try {
+    await execAsync('pkill -9 "Adobe InDesign"');
+    console.log('  🔒 Closed Adobe InDesign');
+    // Wait for process to fully terminate
+    await new Promise(resolve => setTimeout(resolve, 2000));
+  } catch (err) {
+    // pkill returns error if no process found, which is fine
+    console.log('  ✓ InDesign was not running');
+  }
+}
+
+/**
+ * Check if error is a network connection lost error
+ * @param {Error} error - The error to check
+ * @returns {boolean} True if it's a network connection error
+ */
+function isNetworkConnectionError(error) {
+  const errorMsg = error.message.toLowerCase();
+  return errorMsg.includes('network connection was lost') ||
+         errorMsg.includes('modified by another process') ||
+         errorMsg.includes('file was modified');
+}
 
 /**
  * Show folder selection dialog (macOS)
@@ -123,60 +154,100 @@ async function batchConvert() {
       console.log(`\n[${ i + 1}/${zipFiles.length}] Processing: ${zipFile}`);
       console.log('-'.repeat(60));
 
+      // Close InDesign before processing each file
+      await closeInDesign();
+
       let extractPath = null;
       let pdfPath = null;
+      let retryCount = 0;
+      const MAX_RETRIES = 1; // One retry for network errors
 
-      try {
-        // Validate zip file
-        console.log('  ↻ Validating zip file...');
-        const isValid = await isValidZipFile(zipPath);
-        if (!isValid) {
-          throw new Error('Invalid or corrupt zip file');
-        }
+      // Retry loop for network connection errors
+      while (retryCount <= MAX_RETRIES) {
+        try {
+          // Validate zip file
+          if (retryCount === 0) {
+            console.log('  ↻ Validating zip file...');
+            const isValid = await isValidZipFile(zipPath);
+            if (!isValid) {
+              throw new Error('Invalid or corrupt zip file');
+            }
+          } else {
+            console.log(`  🔄 Retry attempt ${retryCount}/${MAX_RETRIES}...`);
+          }
 
-        // Create unique extraction directory
-        const extractId = uuidv4();
-        extractPath = path.join(TEMP_EXTRACT_PATH, extractId);
+          // Create unique extraction directory
+          const extractId = uuidv4();
+          extractPath = path.join(TEMP_EXTRACT_PATH, extractId);
 
-        // Extract zip and find InDesign file
-        console.log('  ↻ Extracting zip file...');
-        const result = await extractZipAndFindInDesignFile(zipPath, extractPath);
-        console.log(`  ✓ InDesign file found: ${path.basename(result.indesignFile)}`);
+          // Extract zip and find InDesign file
+          console.log('  ↻ Extracting zip file...');
+          const result = await extractZipAndFindInDesignFile(zipPath, extractPath);
+          console.log(`  ✓ InDesign file found: ${path.basename(result.indesignFile)}`);
 
-        // Convert to PDF
-        console.log('  ↻ Converting to PDF...');
-        pdfPath = await convertInDesignToPDF(
-          result.indesignFile,
-          extractPath,
-          result.availableFontNames || []
-        );
-        console.log(`  ✓ PDF generated: ${path.basename(pdfPath)}`);
+          // Convert to PDF
+          console.log('  ↻ Converting to PDF...');
+          pdfPath = await convertInDesignToPDF(
+            result.indesignFile,
+            extractPath,
+            result.availableFontNames || []
+          );
+          console.log(`  ✓ PDF generated: ${path.basename(pdfPath)}`);
 
-        // Copy PDF to output folder
-        const outputPdfPath = path.join(OUTPUT_FOLDER, `${baseName}.pdf`);
-        await fs.copyFile(pdfPath, outputPdfPath);
-        console.log(`  ✓ Saved to: ${outputPdfPath}`);
+          // Copy PDF to output folder
+          const outputPdfPath = path.join(OUTPUT_FOLDER, `${baseName}.pdf`);
+          await fs.copyFile(pdfPath, outputPdfPath);
+          console.log(`  ✓ Saved to: ${outputPdfPath}`);
 
-        successCount++;
-        console.log(`  ✅ SUCCESS`);
+          successCount++;
+          console.log(`  ✅ SUCCESS`);
 
-      } catch (error) {
-        errorCount++;
-        console.error(`  ❌ ERROR: ${error.message}`);
+          // Success - break out of retry loop
+          break;
 
-        // Log error for Excel report
-        errors.push({
-          filename: zipFile,
-          error: error.message
-        });
-      } finally {
-        // Clean up temporary files
-        if (extractPath) {
-          try {
-            await fs.rm(extractPath, { recursive: true, force: true });
-            console.log(`  🗑  Cleaned up temporary files`);
-          } catch (cleanupErr) {
-            console.warn(`  ⚠  Failed to cleanup: ${cleanupErr.message}`);
+        } catch (error) {
+          // Check if it's a network connection error and we haven't exhausted retries
+          if (isNetworkConnectionError(error) && retryCount < MAX_RETRIES) {
+            console.error(`  ⚠️  Network connection error detected: ${error.message}`);
+            console.log('  🔄 Closing InDesign and preparing to retry...');
+
+            // Close InDesign completely before retry
+            await closeInDesign();
+
+            // Clean up extraction directory before retry
+            if (extractPath) {
+              try {
+                await fs.rm(extractPath, { recursive: true, force: true });
+                console.log(`  🗑  Cleaned up temporary files before retry`);
+              } catch (cleanupErr) {
+                console.warn(`  ⚠  Failed to cleanup: ${cleanupErr.message}`);
+              }
+            }
+
+            retryCount++;
+            continue; // Try again
+          }
+
+          // Not a network error or no more retries - log and move to next file
+          errorCount++;
+          console.error(`  ❌ ERROR: ${error.message}`);
+
+          // Log error for Excel report
+          errors.push({
+            filename: zipFile,
+            error: error.message
+          });
+
+          break; // Exit retry loop
+        } finally {
+          // Clean up temporary files only if we're done with retries
+          if ((retryCount > MAX_RETRIES || pdfPath) && extractPath) {
+            try {
+              await fs.rm(extractPath, { recursive: true, force: true });
+              console.log(`  🗑  Cleaned up temporary files`);
+            } catch (cleanupErr) {
+              console.warn(`  ⚠  Failed to cleanup: ${cleanupErr.message}`);
+            }
           }
         }
       }
