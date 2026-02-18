@@ -14,9 +14,18 @@ const execAsync = promisify(exec);
  */
 export async function extractZipAndFindInDesignFile(zipPath, extractPath) {
   try {
-    // Extract the zip file
-    const zip = new AdmZip(zipPath);
-    zip.extractAllTo(extractPath, true);
+    // Ensure extraction directory exists
+    await fs.mkdir(extractPath, { recursive: true });
+
+    // Extract the zip file using native unzip (handles large files >2GB)
+    try {
+      await execAsync(`unzip -q "${zipPath}" -d "${extractPath}"`, {
+        maxBuffer: 50 * 1024 * 1024, // 50MB buffer for large file lists
+        timeout: 300000 // 5 minute timeout for large files
+      });
+    } catch (unzipError) {
+      throw new Error(`Failed to extract zip: ${unzipError.message}`);
+    }
 
     // Find InDesign file (.indd, .idml, or .indb book)
     const indesignFile = await findInDesignFile(extractPath);
@@ -292,14 +301,18 @@ async function findDocumentFontsFolder(dirPath) {
 
 /**
  * Validates that a file is a valid zip file
+ * Uses native unzip command to handle large files >2GB
  * @param {string} filePath - Path to the file
  * @returns {Promise<boolean>}
  */
 export async function isValidZipFile(filePath) {
   try {
-    const zip = new AdmZip(filePath);
-    const zipEntries = zip.getEntries();
-    return zipEntries.length > 0;
+    // Use native unzip -t for validation (handles large files)
+    await execAsync(`unzip -tq "${filePath}"`, {
+      timeout: 60000, // 1 minute timeout
+      maxBuffer: 10 * 1024 * 1024 // 10MB buffer
+    });
+    return true;
   } catch (error) {
     return false;
   }
